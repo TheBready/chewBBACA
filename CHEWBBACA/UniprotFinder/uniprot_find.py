@@ -2,373 +2,367 @@
 # -*- coding: utf-8 -*-
 """
 AUTHOR
-    
+
     Rafael Mamede
     github: @rfm-targa
 
 DESCRIPTION
-    
-    
-    
+
+
+
 """
 
-from Bio.Seq import Seq
-from Bio import SeqIO
-from Bio.Alphabet import generic_dna
 import os
-import argparse
-from SPARQLWrapper import SPARQLWrapper, JSON
 import csv
+import time
+import argparse
+import concurrent.futures
 from collections import defaultdict
-import multiprocessing
-virtuoso_server=SPARQLWrapper('http://sparql.uniprot.org/sparql')
 
-class Result():
-    def __init__(self):
-        self.val = []
-
-    def update_result(self, val):
-        lala=val
-        self.val.append(lala)
-
-    def get_result(self):
-        return self.val
-
-def translateSeq(DNASeq, verbose):
-    if verbose:
-        def verboseprint(*args):
-            for arg in args:
-                print (arg),
-            print
-    else:
-        verboseprint = lambda *a: None  # do-nothing function
-
-    seq = DNASeq
-    tableid = 11
-    inverted = False
-
-    myseq = Seq(seq)
-    protseq = Seq.translate(myseq, table=tableid, cds=True)
+from Bio import SeqIO
+from Bio.Seq import Seq
+from SPARQLWrapper import SPARQLWrapper, JSON
 
 
-    return str(protseq)
+virtuoso_server = SPARQLWrapper('http://sparql.uniprot.org/sparql')
+
+
+def translate_sequence(dna_str, table_id):
+    """ Translate a DNA sequence using the BioPython package.
+
+        Args:
+            dna_str (str): DNA sequence as string type.
+            table_id (int): translation table identifier.
+
+        Returns:
+            protseq (str): protein sequence created by translating
+            the input DNA sequence.
+    """
+
+    myseq_obj = Seq(dna_str)
+    protseq = Seq.translate(myseq_obj, table=table_id, cds=True)
+
+    return protseq
+
+
+def is_fasta(filename):
+    """ Checks if a file is a FASTA file.
+        Args:
+            filename (str): the full path to the FASTA file
+        Returns:
+            True if FASTA file,
+            False otherwise
+    """
+
+    try:
+        with open(filename, 'r') as handle:
+            fasta = SeqIO.parse(handle, 'fasta')
+
+            # returns True if FASTA file, False otherwise
+            return any(fasta)
+
+    except UnicodeDecodeError:
+        return False
+
 
 def check_if_list_or_folder(folder_or_list):
-    list_files = []
-    # check if given a list of genomes paths or a folder to create schema
-    try:
-        f = open(folder_or_list, 'r')
-        f.close()
-        list_files = folder_or_list
-    except IOError:
+    """ Checks if the input is a file or a directory.
+        Args:
+            folder_or_list (str): the full path to the file or directory
+        Returns:
+            list_files (str) if folder_or_list is a path to a file,
+            list_files (list) if folder_or_list is a path to a directory,
+            Raises Exception otherwise
+    """
 
-        for gene in os.listdir(folder_or_list):
-            try:
-                genepath = os.path.join(folder_or_list, gene)
-                for allele in SeqIO.parse(genepath, "fasta", generic_dna):
-                    break
-                list_files.append(os.path.abspath(genepath))
-            except Exception as e:
-                print (e)
-                pass
+    # check if input argument is a file or a directory
+    if os.path.isfile(folder_or_list):
+        list_files = folder_or_list
+
+    elif os.path.isdir(folder_or_list):
+
+        fasta_files = []
+
+        for genome in os.listdir(folder_or_list):
+
+            genepath = os.path.join(folder_or_list, genome)
+
+            # do not continue if genepath is a dir
+            if os.path.isdir(genepath):
+                continue
+
+            # check if file is a FASTA file
+            if is_fasta(genepath):
+                fasta_files.append(os.path.abspath(genepath))
+
+        # if there are FASTA files
+        list_files = 'genes_list.txt'
+        if fasta_files:
+            # store full paths to FASTA files
+            with open(list_files, 'w') as f:
+                for genome in fasta_files:
+                    f.write(genome + '\n')
+        else:
+            raise Exception('There were no FASTA files in the given directory. Please provide a directory \
+                            with FASTA files or a file with the list of full paths to the FASTA files.')
+
+    else:
+        raise Exception('Input argument is not a valid directory or file with a list of paths. \
+                        Please provide a valid input, either a folder with FASTA files or a file with \
+                        the list of full paths to FASTA files (one per line).')
 
     return list_files
 
 
-def get_data(sparql_query):
-    virtuoso_server.setQuery(sparql_query)
-    virtuoso_server.setReturnFormat(JSON)
-    virtuoso_server.setTimeout(10)
-    try:
-        result = virtuoso_server.query().convert()
-    except:
-        print ("A request to uniprot timed out, trying new request")
-        time.sleep(5)
-        result = virtuoso_server.query().convert()
-    return result
-
-def get_protein_info(proteinSequence):
-    proteinSequence=proteinSequence.replace("*","")
-
-    name=''
-    url=''
-    prevName=''
-    prevUrl=''
-
-    query='PREFIX rdf:<http://www.w3.org/1999/02/22-rdf-syntax-ns#>  PREFIX up: <http://purl.uniprot.org/core/> select ?seq ?fname ?fname2 ?fname3  where {{?b a up:Simple_Sequence; rdf:value "'+proteinSequence+'". ?seq up:sequence ?b. OPTIONAL{?seq up:submittedName ?sname. ?sname up:fullName ?fname2} OPTIONAL{?seq up:recommendedName ?rname.?rname up:fullName ?fname} }UNION{?seq a up:Sequence; rdf:value "'+proteinSequence+'"; rdfs:label ?fname3. }}'
-    result = get_data(query)
-    #~ print (query)
+def select_name(result):
+    """
+    """
 
     try:
-        result["results"]["bindings"][0]
-        aux=result["results"]["bindings"]
+        aux = result["results"]["bindings"]
         for elem in aux:
             if 'fname' in elem.keys():
-                name=str(elem['fname']['value'])
-                url=str(elem['seq']['value'])
+                name = str(elem['fname']['value'])
             elif 'fname2' in elem.keys():
-                name=str(elem['fname2']['value'])
-                url=str(elem['seq']['value'])
+                name = str(elem['fname2']['value'])
             elif 'fname3' in elem.keys():
-                name=str(elem['fname3']['value'])
-                url=str(elem['seq']['value'])
+                name = str(elem['fname3']['value'])
+
+            url = str(elem['seq']['value'])
+
+        return [name, url]
+
+    except Exception:
+
+        return ['', '']
 
 
-            if not "Uncharacterized protein" in name:
-                break
+def get_data(sparql_queries):
+    """
+    """
 
-            if prevName=='' and (not "Uncharacterized protein" in name or not "hypothetical" in name or not "DUF" in name):
-                prevName=name
-                prevUrl=url
-            else:
-                name=prevName
-                url=prevUrl
+    locus = sparql_queries[0]
+    queries = sparql_queries[1]
+    virtuoso_server.setReturnFormat(JSON)
+    virtuoso_server.setTimeout(10)
 
-            #~ print (name)
-            #~ print (url)
+    url = ''
+    name = ''
+    prev_name = ''
+    found = False
+    unpreferred_names = ['Uncharacterized protein', 'hypothetical protein', 'DUF']
 
-    except Exception as e:
-        return False
-
-
-
-
-    return str(name),str(url)
-
-def proc_gene(gene,auxBar):
-
-    #~ print gene
-    name=''
-    url=''
-    prevName=''
-    prevUrl=''
-    for allele in SeqIO.parse(gene, "fasta", generic_dna):
-        params = {}
-        sequence=str(allele.seq)
+    # implement more than 1 retry!!!
+    alleles = len(queries)
+    a = 0
+    while found is False:
+        virtuoso_server.setQuery(queries[a])
         try:
-            proteinSequence=translateSeq(sequence,False)
-        except:
-            continue
-        try:
-            name,url=get_protein_info(proteinSequence)
-            if "Uncharacterized protein" in name or "hypothetical" in name or "DUF" in name :
-                if not prevName=="":
-                    name=prevName
-                    url=prevUrl
-                #~ print("trying next allele")
-                continue
-            else:
-                prevName=name
-                prevUrl=url
-                #~ print (name)
-                #~ print (url)
-                break
-        except Exception as e:
-            #~ print (e)
-            #~ print("trying next allele")
-            continue
+            result = virtuoso_server.query().convert()
 
-    if gene in auxBar:
-        auxlen=len(auxBar)
-        index=auxBar.index(gene)
-        print ( "["+"="*index+">"+" "*(auxlen-index)+"] Querying "+str(int((float(index)/auxlen)*100))+"%")
+            name, url = select_name(result)
 
-    return [gene, name, url]
+            if prev_name == '':
+                prev_name = name
+            elif prev_name != '' and not any([n in name for n in unpreferred_names]):
+                prev_name = name
+                found = True
 
-def main(geneFiles,proteinid2genome,cpu2use):
-    #~ parser = argparse.ArgumentParser(
-    #~ description="This program get names for a schema")
-    #~ parser.add_argument('-i', nargs='?', type=str, help='path to folder containg the schema fasta files ( alternative a list of fasta files)', required=True)
-    #~ parser.add_argument('-t', nargs='?', type=str, help='path to tsv file)', required=True)
-    #~ parser.add_argument('--cpu', nargs='?', type=int, help='number of cpu', required=False, default=1)
-    #~
-    #~ args = parser.parse_args()
-    #~
-    #~ geneFiles = args.i
-    #~ proteinid2genome = args.t
-    #~ cpu2use = args.cpu
+        except Exception:
+            #print("A request to uniprot timed out, trying new request")
+            time.sleep(5)
+            result = virtuoso_server.query().convert()
+            name, url = select_name(result)
 
-    geneFiles = check_if_list_or_folder(geneFiles)
-    if isinstance(geneFiles, list):
-        with open("listGenes.txt", "w") as f:
-            for genome in geneFiles:
-                f.write(genome + "\n")
-        geneFiles = "listGenes.txt"
+            if prev_name == '':
+                prev_name = name
+            elif prev_name != '' and not any([n in name for n in unpreferred_names]):
+                prev_name = name
+                found = True
 
-    listGenes=[]
-    gene_fp = open( geneFiles, 'r')
-    for gene in gene_fp:
-        gene = gene.rstrip('\n')
-        listGenes.append(gene)
-    gene_fp.close()
+        a += 1
+        if a == alleles:
+            found = True
 
-    try:
-        os.remove("listGenes.txt")
-    except:
-        pass
+    return (locus, prev_name, url)
 
-    dictaux= defaultdict(list)
 
-    with open(proteinid2genome) as csvfile:
+def uniprot_query(sequence):
+    """
+    """
+
+#    query = ('PREFIX rdf:<http://www.w3.org/1999/02/22-rdf-syntax-ns#>  '
+#                'PREFIX up: <http://purl.uniprot.org/core/> '
+#                'PREFIX rdfs:<http://www.w3.org/2000/01/rdf-schema#> '
+#                'select ?seq ?label ?sname where { ?b a up:Simple_Sequence; '
+#                'rdf:value "' + sequence + '". ?seq up:sequence ?b. '
+#                'OPTIONAL {?seq rdfs:label ?label.} '
+#                'OPTIONAL {?seq up:submittedName ?rname2. ?rname2 up:fullName ?sname.}}LIMIT 20')
+
+
+    query = ('PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>  '
+             'PREFIX up: <http://purl.uniprot.org/core/> '
+             'select ?seq ?fname ?fname2 ?fname3  where {'
+             '{?b a up:Simple_Sequence; rdf:value '
+             '"'+sequence+'". ?seq up:sequence ?b. '
+             'OPTIONAL{?seq up:submittedName ?sname. ?sname up:fullName ?fname2} '
+             'OPTIONAL{?seq up:recommendedName ?rname.?rname up:fullName ?fname} }'
+             'UNION{?seq a up:Sequence; rdf:value "'+sequence+'"; '
+             'rdfs:label ?fname3. }}')
+
+    return query
+
+
+def main(schema_directory, protein_table, threads):
+
+    gene_files = check_if_list_or_folder(schema_directory)
+
+    with open(gene_files, 'r') as f:
+        genes_list = f.readlines()
+        genes_list = [file.strip() for file in genes_list]
+
+    os.remove(gene_files)
+    print('\nGenes to annotate: {0}'.format(len(genes_list)))
+    print('Number of threads: {0}\n'.format(threads))
+
+    # import protein table into memory
+    proteins_info = defaultdict(list)
+    with open(protein_table) as csvfile:
         reader = csv.reader(csvfile, delimiter='\t')
-        headers = next(reader)
         for row in reader:
-            for elem in row:
-                dictaux[row[0]+row[-1]].append(str(elem))
+            dict_key = '{0}{1}{2}'.format(row[0].replace('_', '-'),
+                                          '-protein', row[-1])
+            proteins_info[dict_key] = [str(e) for e in row]
 
+    print('Searching for annotations...')
 
+    # translate all proteins
+    # and save into files
+    protein_files = []
+    for file in genes_list:
+        prots = []
+        locus_id = os.path.basename(file)
+        locus_id = locus_id.split('.fasta')[0]
+        for record in SeqIO.parse(file, 'fasta'):
+            protid = record.id
+            protein = translate_sequence(str(record.seq), 11)
+            prots.append((protid, protein))
 
-    print ("Processing the fastas")
-    got=0
-    notgot=[]
-    uncharacterized=[]
-    selected_prots=[]
-    counter=0
+        protein_lines = []
+        for prot in prots:
+            header = '>{0}\n'.format(prot[0])
+            sequence = '{0}\n'.format(prot[1])
+            protein_lines.append(header)
+            protein_lines.append(sequence)
 
+        protein_lines = ''.join(protein_lines)
+        parent_dir = os.path.dirname(schema_directory)
+        protein_file = '{0}/{1}{2}'.format(parent_dir, locus_id, '_protein.fasta')
+        with open(protein_file, 'w') as pf:
+            pf.write(protein_lines)
+        protein_files.append(protein_file)
 
-    #test down bar
-    auxBar=[]
-    #~ orderedkeys=sorted(newDict.keys())
-    step=(int((len(listGenes))/10))+1
-    counter=0
-    while counter < len(listGenes):
-        auxBar.append(listGenes[counter])
-        counter+=step
+    # construct queries
+    # create generators with queries
+    queries = {}
+    for file in protein_files:
+        file_id = os.path.basename(file).split('_protein.fasta')[0]
+        queries[file_id] = []
+        for record in SeqIO.parse(file, 'fasta'):
+            queries[file_id].append(uniprot_query(str(record.seq)))
 
-    pool = multiprocessing.Pool(cpu2use)
-    result = Result()
-    for gene in listGenes:
-        p=pool.apply_async(proc_gene,args=[gene,auxBar],callback=result.update_result)
+    # GET annotation and URL data from Uniprot
+    results = []
+    processed = 0
+    total = len(queries)
+    tick_number = 20
+    with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+        for res in executor.map(get_data, list(queries.items())):
+            # update progress bar values
+            processed += 1
+            progress = '{0}/{1}'.format(processed, total)
+            current_progress = processed/total
+            current_ticks = '=' * int(current_progress * tick_number)
+            rest = ' ' * (tick_number - len(current_ticks))
+            progress_bar = '[{0}{1}]'.format(current_ticks, rest)
+            # print progress bar
+            print('\r', '{0} {1}'.format(progress_bar, progress), end='')
 
-    pool.close()
-    pool.join()
-    listResults=result.get_result()
+            results.append(res)
 
+    genes_ids = []
+    protein_names = []
+    uniprot_urls = []
+    for res in results:
+        genes_ids.append(res[0])
+        protein_names.append(res[1])
+        uniprot_urls.append(res[2])
 
-    for result in listResults:
-        #~ lala=process_locus(gene,path2schema,newDict,auxBar)
-        gene=result[0]
-        name=result[1]
-        url=result[2]
+    # determine annotation type and create lines for new table
+    null = 0
+    valid = 0
+    hypothetical = 0
+    uncharacterized = 0
+    annotated_lines = []
+    for n in range(len(genes_ids)):
 
-        print ("final name: "+name)
-        if "Uncharacterized protein" in name or "hypothetical" in name:
-            uncharacterized.append(gene)
-            got+=1
+        name = protein_names[n]
+        gene_id = genes_ids[n]
+        url = uniprot_urls[n]
 
-        elif name=="":
-            notgot.append(gene)
+        if 'Uncharacterized protein' in name:
+            uncharacterized += 1
+            valid += 1
+        elif 'hypothetical' in name:
+            hypothetical += 1
+            valid += 1
+        elif name == '':
+            null += 1
         else:
-            got+=1
+            valid += 1
 
-        aux=gene.split("-protein")
-        protid=aux[-1].replace(".fasta","")
-        aux2=aux[0].split("/")[-1].replace("-","_")
-        dictaux[aux2+protid].append(str(name))
-        dictaux[aux2+protid].append(str(url))
-        dictaux[aux2+protid].insert(0,os.path.basename(gene))
-        selected_prots.append(aux2+protid)
+        new_line = proteins_info[gene_id]
+        new_line.append(name)
+        new_line.append(url)
+        new_line = '\t'.join(new_line)
+        annotated_lines.append(new_line)
 
+    annotated_lines_text = '\n'.join(annotated_lines)
+    file_header = 'File\tGenome\tContig\tStart\tStop\tProtID\tName\tURL\n'
+    annotated_lines_text = file_header + annotated_lines_text
 
-    newProfileStr="Fasta\t"+('\t'.join(map(str, headers)))+"\tname\turl\n"
-    for key in set(sorted(selected_prots,key=str)):
-        newProfileStr += ('\t'.join(map(str, dictaux[key])))+"\n"
+    with open('proteinID_Genomes_annotated.tsv', 'w') as pfa:
+        pfa.write(annotated_lines_text)
 
-    print ("Found : " +str(got)+ ", "+str(len(uncharacterized))+" of them uncharacterized/hypothetical. Nothing found on :"+str(len(notgot)))
-    with open("new_protids.tsv", "w") as f:
-        f.write(newProfileStr)
+    print('\n\nFound annotations for {0} genes ({1} Uncharacterized, {2} Hypothetical).'.format(valid, uncharacterized, hypothetical))
+    print('Could not find annotations for {0} genes.'.format(null))
 
-    print ("Done")
+    for file in protein_files:
+        os.remove(file)
 
-
-if __name__ == "__main__":
-    main()
-
-########################################
-# Test downloading reference proteome...
-
-import urllib.request
-
-url = 'ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/README'
-urllib.request.urlretrieve(url, '/home/rfm/Desktop/rfm/Lab_Software/UniprotFinder_tests/proteome_list')
-
-with open('proteome_list', 'r') as p:
-    lines = p.readlines()
-
-header_idx = [idx for idx, line in enumerate(lines) if line.startswith('Proteome_ID')][0]
-header = 'Proteome_ID\tTax_ID\tSpecies_name\n'
-
-i = header_idx + 1
-full_table = False
-table_lines = []
-while full_table is False:
-    if lines[i] != '\n':
-        table_lines.append(lines[i])
-    else:
-        full_table = True
-    i += 1
-
-table_lines = [line.split(' ') for line in table_lines]
-
-proteome_ids = [line[0] for line in table_lines]
-taxids = [line[1] for line in table_lines]
-
-species_names = []
-for line in table_lines:
-    i = -1
-    gotcha = False
-    new_sp = []
-    while gotcha is False:
-        if line[i] != '':
-            new_sp.append(line[i].strip())
-        elif line[i] == '':
-            gotcha = True
-        i -= 1
-    species_str = ' '.join(new_sp[::-1])
-    species_names.append(species_str)
-    
-output_lines = []
-output_lines.append(header)
-for l in range(len(proteome_ids)):
-    new_line = '{0}\t{1}\t{2}\n'.format(proteome_ids[l], taxids[l], species_names[l])
-    output_lines.append(new_line)
-    
-with open('proteomes_table.tsv', 'w') as p:
-    
-    p.writelines(output_lines)
-
-# Test getting a file name by providing species name
-taxon = 'Streptococcus agalactiae'
-with open('proteomes_table.tsv', 'r') as p:
-    lines2 = p.readlines()
-
-# get lines with taxon name
-with_taxon = [line for line in lines2 if taxon in line]
-
-# create proteome name to download from UniProt
-splitted_line = with_taxon[0].split('\t')
-
-uniprot_file = '{0}_{1}.fasta.gz'.format(splitted_line[0], splitted_line[1])
-
-ftp_path = 'ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/reference_proteomes/Bacteria/{0}'.format(uniprot_file)
-urllib.request.urlretrieve(ftp_path, 'Streptococcus_agalactiae_refprot.fasta.gz')
-
-import gzip
-f = gzip.open('Streptococcus_agalactiae_refprot.fasta.gz', 'rb')
-file_content = f.read()
-f.close()
-
-# save fasta file with reference proteome!
-with open('Streptococcus_agalactiae_refprot.fasta', 'w') as f:
-    f.writelines(file_content.decode('utf-8'))
-
-# create BLAST db with all reference proteome sequences and with all schema representatives
-# BLAST each representative against all proteins from reference proteome and aginst itself (limit ids to BLAST against with -parse_ids...)
+    print("Done!")
 
 
+def parse_arguments():
+
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    parser.add_argument('-i', type=str, required=True, dest='input_files',
+                        help='')
+
+    parser.add_argument('-t', type=str, required=True, dest='protein_table',
+                        help='')
+
+    parser.add_argument('--threads', type=int, required=False, dest='threads',
+                        default=10, help='')
+
+    args = parser.parse_args()
+
+    return [args.input_files, args.protein_table, args.threads]
 
 
+if __name__ == '__main__':
 
-
-
-
+    args = parse_arguments()
+    main(args[0], args[1], args[2])
