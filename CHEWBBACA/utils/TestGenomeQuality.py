@@ -4,7 +4,7 @@
 AUTHORS
 
     Mickael Silva
-    email: @mickaelsilva
+    github: @mickaelsilva
 
     Pedro Cerqueira
     github: @pedrorvc

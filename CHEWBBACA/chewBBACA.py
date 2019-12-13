@@ -295,14 +295,14 @@ def test_schema():
 
     args = parser.parse_args()
 
-    pathOutputfile = args.i
-    iterationNumber = args.n
-    thresholdBadCalls = args.t
-    step = args.s
-    out_folder = args.o
+    input_file = args.input_file
+    iteration = args.max_iterations
+    threshold = args.threshold
+    step = args.threshold_step
+    out_folder = args.output_dir
 
-    TestGenomeQuality.main(pathOutputfile, iterationNumber,
-                           thresholdBadCalls, step, out_folder)
+    TestGenomeQuality.main(input_file, iteration,
+                           threshold, step, out_folder)
 
 
 def extract_cgmlst():
