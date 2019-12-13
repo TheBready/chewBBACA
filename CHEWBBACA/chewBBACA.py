@@ -264,24 +264,34 @@ def evaluate_schema():
     ValidateSchema.main(genes,cpuToUse,outputpath,transTable,threshold,splited,title,logScale,OneBadGeneNotConserved,light)
 
 
-
 def test_schema():
 
     def msg(name=None):                                                            
-        return ''' chewBBACA.py TestGenomeQuality [TestGenomeQuality ...] [-h] -i [I] -n [N] -t [T] -s [S] [-o [O]] [-v]
-                    '''
+        return ''' chewBBACA.py TestGenomeQuality [TestGenomeQuality ...] [-h] -i [I] -n [N] -t [T] -s [S] [-o [O]] [-v] '''
 
-    parser = argparse.ArgumentParser(
-        description="This program analyze an allele call raw output matrix, returning info on which genomes are responsible for cgMLST loci loss",usage=msg())
-    parser.add_argument('TestGenomeQuality', nargs='+', help='test the quality of the genomes on the allele call')
-    parser.add_argument('-i', nargs='?', type=str, help='raw allele call matrix file', required=True)
-    parser.add_argument('-n', nargs='?', type=int, help='maximum number of iterations', required=True)
-    parser.add_argument('-t', nargs='?', type=int, help='maximum threshold of bad calls above 95 percent',
-                        required=True)
-    parser.add_argument('-s', nargs='?', type=int, help='step between each threshold analysis', required=True)
-    parser.add_argument('-o', nargs='?', type=str, help="Folder for the analysis files", required=False, default=".")
-    parser.add_argument("-v", "--verbose", help="increase output verbosity", dest='verbose', action="store_true",
-                        default=False)
+    parser = argparse.ArgumentParser(description='This program analyze an allele call raw'
+                                                 ' output matrix, returning info on which '
+                                                 'genomes are responsible for cgMLST loci '
+                                                 'loss',usage=msg())
+
+    parser.add_argument('TestGenomeQuality', nargs='+',
+                        help='Test the quality of the genomes on the allele call.')
+    parser.add_argument('-i', type=str, required=True, dest='input_file',
+                        help='Raw allele call matrix file (results_alleles.tsv).')
+    parser.add_argument('-n', type=int, required=True, dest='max_iterations',
+                        help='Maximum number of iterations per threshold. Several'
+                        'iterations might be necessary to get stable values for'
+                        ' the number of present genes and number of genomes used.')
+    parser.add_argument('-t', type=int, required=True, dest='threshold',
+                        help='Threshold value for the maximum number of missing genes '
+                        'per genome.')
+    parser.add_argument('-s', type=int, required=True, dest='threshold_step',
+                        help='Step between each threshold analysis. The process'
+                        ' will start with a threshold value of 0 and will increment'
+                        'the threshold value based on this step value.')
+    parser.add_argument('-o', type=str, required=False, default='.',
+                        dest='output_dir',
+                        help='Output files will be saved in this folder.')
 
     args = parser.parse_args()
 
@@ -290,10 +300,9 @@ def test_schema():
     thresholdBadCalls = args.t
     step = args.s
     out_folder = args.o
-    verbose = args.verbose
 
-    TestGenomeQuality.main(pathOutputfile,iterationNumber,thresholdBadCalls,step,out_folder,verbose)
-
+    TestGenomeQuality.main(pathOutputfile, iterationNumber,
+                           thresholdBadCalls, step, out_folder)
 
 
 def extract_cgmlst():
